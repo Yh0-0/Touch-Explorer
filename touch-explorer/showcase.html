@@ -1080,8 +1080,8 @@ img.s1-about-arrow {
 @media (max-width:1023px) {
   /* S1 */
   .s1-topright { top:24px; }
-  .s1-bottom-right { display:none; } /* hide "About the project" — too cramped */
   .s1-bottom { flex-wrap:wrap; gap:12px; }
+  .s1-bottom-right { margin-left:0; margin-top:10px; width:100%; }
 
   /* S8 */
   #s8 { flex-direction:column; }
@@ -1103,8 +1103,10 @@ img.s1-about-arrow {
   .s1-heading { font-size:clamp(36px, 10.5vw, 60px); margin-bottom:16px; }
   .s1-sub { font-size:14px; max-width:100%; }
   .s1-try-btn { font-size:13px; padding:10px 20px; margin-left:12px; }
-  .s1-bottom-right { display:none; }
-  .s1-colorbar { margin-top:20px; }
+  .s1-bottom-right { margin-left:0; margin-top:8px; width:100%; }
+  .s1-about-btn { font-size:16px; }
+  img.s1-about-arrow { width:32px; height:32px; }
+  .s1-colorbar { margin-top:16px; }
 
   /* S2 — op buttons smaller */
   .sc-op-btn, .s25-op-btn {
@@ -2924,6 +2926,47 @@ requestAnimationFrame(() => {
 SOFAS.forEach(sofa => { new Image().src = pressPath(sofa, 0); });
 new Image().src = stretchPath(0);
 
+})();
+
+// ── Touch → wheel translation for mobile ─────────────────────────────────────
+(function() {
+  let _ty0 = 0, _tx0 = 0, _tActive = false;
+  const THRESHOLD = 40; // min px swipe to fire
+  const COOLDOWN  = 600;
+  let _lastFired  = 0;
+
+  function fireWheel(dy) {
+    if (performance.now() - _lastFired < COOLDOWN) return;
+    _lastFired = performance.now();
+    const opts = { deltaY: dy, bubbles: true, cancelable: true };
+    // Fire on both scroller and window so all handlers are covered
+    const sc = document.getElementById('scroller');
+    if (sc) sc.dispatchEvent(new WheelEvent('wheel', opts));
+    window.dispatchEvent(new WheelEvent('wheel', opts));
+  }
+
+  document.addEventListener('touchstart', function(e) {
+    if (e.touches.length !== 1) return;
+    _ty0 = e.touches[0].clientY;
+    _tx0 = e.touches[0].clientX;
+    _tActive = true;
+  }, { passive: true });
+
+  document.addEventListener('touchend', function(e) {
+    if (!_tActive) return;
+    _tActive = false;
+    const dy = _ty0 - e.changedTouches[0].clientY;
+    const dx = _tx0 - e.changedTouches[0].clientX;
+    // Only fire for vertical swipes (more vertical than horizontal)
+    if (Math.abs(dy) < THRESHOLD || Math.abs(dy) < Math.abs(dx)) return;
+    fireWheel(dy > 0 ? 120 : -120);
+  }, { passive: true });
+
+  document.addEventListener('touchmove', function(e) {
+    // Prevent native scroll on all non-S1 sections (S1 uses scroller natively)
+    const sc = document.getElementById('scroller');
+    if (sc && sc.scrollTop > 10) e.preventDefault();
+  }, { passive: false });
 })();
 </script>
 

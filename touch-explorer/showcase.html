@@ -1707,9 +1707,10 @@ function s23Animate(dir) {
 
 function onS23PanelsWheel(e) {
   e.preventDefault();
+  if (_transitioning) return;
   const dir = e.deltaY > 0 ? 1 : -1;
   if (dir > 0 && s23AnimP >= 1 && !s23AnimId) {
-    // Panels fully shown — enter S3 explanation screen
+    lockTransition(1400);
     scroller.removeEventListener('wheel', onS23PanelsWheel);
     enterS3();
     return;
@@ -1761,6 +1762,20 @@ let s3MeterRafId = null;
 let s3AnimStart  = null;
 let s3TextState  = 'none'; // tracks label transitions
 let s3EnteredAt  = 0;      // timestamp for scroll-bleed guard
+
+// ── Global transition lock ────────────────────────────────────────────────────
+// Prevents wheel/touch events from firing during section transitions
+let _transitioning = false;
+function lockTransition(ms) {
+  _transitioning = true;
+  clearTimeout(lockTransition._t);
+  lockTransition._t = setTimeout(() => { _transitioning = false; }, ms || 1200);
+}
+function guardWheel(e) {
+  // Returns true if the event should be ignored
+  if (_transitioning) { e.preventDefault(); return true; }
+  return false;
+}
 
 function s3MeterLoop(now) {
   if (!s3AnimStart) s3AnimStart = now;
@@ -1884,13 +1899,13 @@ function exitS3() {
 
 function onS3Wheel(e) {
   e.preventDefault();
-  if (performance.now() - s3EnteredAt < 600) return; // scroll-bleed guard
+  if (guardWheel(e)) return;
+  if (performance.now() - s3EnteredAt < 600) return;
+  lockTransition(1400);
   if (e.deltaY < 0) {
-    // Scroll up — retract curtain, back to S23 panels
     exitS3();
     scroller.addEventListener('wheel', onS23PanelsWheel, { passive: false });
   } else {
-    // Scroll down — retract curtain, enter S24 spotlight
     exitS3();
     setTimeout(() => enterS24(), 900);
   }
@@ -2201,7 +2216,9 @@ function exitS25() {
 
 function onS25Wheel(e) {
   e.preventDefault();
+  if (guardWheel(e)) return;
   if (performance.now() - s25EnteredAt < 600) return;
+  lockTransition(1400);
   if (e.deltaY < 0) {
     exitS25();
     enterS24();
@@ -2381,7 +2398,9 @@ function exitS26() {
 
 function onS26Wheel(e) {
   e.preventDefault();
+  if (guardWheel(e)) return;
   if (performance.now() - s26EnteredAt < 600) return;
+  lockTransition(1400);
   if (e.deltaY < 0) {
     // Scroll up → back to S25
     exitS26();
@@ -2408,9 +2427,11 @@ function onS26Wheel(e) {
 let s8WheelGuard = 0;
 function onS8Wheel(e) {
   if (e.deltaY >= 0) return;
+  if (guardWheel(e)) return;
   if (performance.now() - s8WheelGuard < 600) return;
   s8WheelGuard = performance.now();
   e.preventDefault();
+  lockTransition(1400);
   window.removeEventListener('wheel', onS8Wheel);
   // Scroll S8 back to top first, then crossfade to S26
   scroller.scrollTo({ top: scroller.scrollTop - window.innerHeight, behavior: 'smooth' });
@@ -2428,6 +2449,8 @@ function onS8Wheel(e) {
 function onS24Wheel(e) {
   if (!s24Entered) return;
   e.preventDefault();
+  if (guardWheel(e)) return;
+  lockTransition(1400);
   if (e.deltaY > 0) {
     // Scroll down — S25 (header text changes only, no curtain)
     exitS24(false);
@@ -2479,9 +2502,9 @@ function setS23Widths(w0, w1, w2) {
 function onS23Wheel(e) {
   if (s23Phase === 'done') return;
   const s2rect = s2.getBoundingClientRect();
-  // Only intercept when S2 is pinned at top
   if (s2rect.top > 10 || s2rect.bottom < window.innerHeight - 10) return;
-  e.preventDefault(); // always freeze the page while in S2
+  e.preventDefault();
+  if (_transitioning) return;
 
   if (e.deltaY < 0) {
     // Scroll UP — go back to previous mode; from press (first) just block scroll
@@ -2500,7 +2523,7 @@ function onS23Wheel(e) {
 
   if (s23Phase === 'press') {
     clearTimeout(s2AutoTimer);
-    // If auto-cycle already reached squeezein, skip straight to s23 panels
+    lockTransition(1000);
     if (s2Mode === 'squeezein') {
       s23Phase = 'done';
       setS2Mode('press', false);
@@ -2512,14 +2535,17 @@ function onS23Wheel(e) {
     setS2Mode('structure', true);
     s23Phase = 'structure';
   } else if (s23Phase === 'structure') {
+    lockTransition(1000);
     s2overlay.style.transition = 'opacity 1s';
     setS2Mode('squeeze', true);
     s23Phase = 'squeeze';
   } else if (s23Phase === 'squeeze') {
+    lockTransition(1000);
     s2overlay.style.transition = 'opacity 1s';
     setS2Mode('squeezein', true);
     s23Phase = 'squeezein';
   } else if (s23Phase === 'squeezein') {
+    lockTransition(600);
     s23Phase = 'done';
     scroller.removeEventListener('wheel', onS23Wheel);
     scroller.addEventListener('wheel', onS23PanelsWheel, { passive: false });
@@ -2922,9 +2948,18 @@ requestAnimationFrame(() => {
   s3PanelRefs.forEach(e => { e.refs.el.style.width='0px'; e.refs.el.style.display='none'; });
 });
 
-// Preload only frame 0 of each sofa to avoid initial flash
-SOFAS.forEach(sofa => { new Image().src = pressPath(sofa, 0); });
-new Image().src = stretchPath(0);
+// Preload frames eagerly — all press frames for S2 sofa + stretch + key S3 frames
+(function preloadAll() {
+  // S2 sofa (JÄTTEBO) — all press frames
+  const j = SOFAS[0];
+  for (let i = 0; i <= j.endFrame; i++) { new Image().src = pressPath(j, i); }
+  // Stretch frames
+  for (let i = 0; i <= 31; i++) { new Image().src = stretchPath(i); }
+  // S3 panels — frame 15 for each sofa (used in the compare reveal)
+  SOFAS.forEach(s => { new Image().src = pressPath(s, 15); });
+  // S3 panels — frame 0 for KIVIK and SÖDERHAMN
+  SOFAS.slice(1).forEach(s => { new Image().src = pressPath(s, 0); });
+})();
 
 })();
 

@@ -1452,7 +1452,7 @@ function updatePanelRatio(refs, ratio) {
   const jMax = SOFAS[s24Primary].maxPress; // primary sofa drives the depth scale
   // Frame: advance at same rate as primary, cap at this sofa's own maxPress
   const frameIdx = Math.min(Math.round(ratio * jMax), sofa.maxPress);
-  refs.frame.src = pressPath(sofa, frameIdx);
+  setSrc(refs.frame, pressPath(sofa, frameIdx));
 
   // Per-sofa press ratio (for meter zones) — can reach 1 before ratio does
   const sofaRatio = sofa.maxPress > 0 ? frameIdx / sofa.maxPress : 0;
@@ -2721,7 +2721,7 @@ function s2RAF(now) {
     const jMax     = SOFAS[s24Primary].maxPress;
     const frameIdx = Math.min(Math.round(ratio * jMax), JATTEBO.maxPress);
     const sofaRatio = JATTEBO.maxPress > 0 ? frameIdx / JATTEBO.maxPress : 0;
-    if (s2frame) s2frame.src = pressPath(JATTEBO, Math.min(frameIdx, JATTEBO.count - 1));
+    if (s2frame) setSrc(s2frame, pressPath(JATTEBO, Math.min(frameIdx, JATTEBO.count - 1)));
     const pressedPx = sofaRatio * s2FloorPx;
     s2mz1.style.height = pressedPx + 'px';
     s2mz2.style.height = (s2FloorPx - pressedPx) + 'px';
@@ -2756,9 +2756,10 @@ function s2RAF(now) {
       // All non-press modes bounce and count reps
       s2StretchTick = Math.max(0, Math.min(maxFrames - 1, s2StretchTick + s2StretchDir));
 
-      if (s2Mode === 'structure')    s2overlay.src = stretchPath(s2StretchTick);
-      else if (s2Mode === 'squeeze') s2overlay.src = s2KivikStretchPath(s2StretchTick);
-      else                           s2overlay.src = s2KivikSqueezePath(s2StretchTick);
+      var _nextSrc = s2Mode === 'structure'  ? stretchPath(s2StretchTick)
+                   : s2Mode === 'squeeze'   ? s2KivikStretchPath(s2StretchTick)
+                   :                         s2KivikSqueezePath(s2StretchTick);
+      setSrc(s2overlay, _nextSrc);
 
       // Hit the far end
       if (s2StretchTick >= maxFrames - 1 && s2StretchDir > 0) {
@@ -2865,7 +2866,7 @@ function setS2Mode(mode, startAutoCycle) {
       s2StretchTick = 0;
       s2StretchDir  = 1;
       s2SetFingerMorph(1); // start at pinch-out (spread)
-      s2overlay.src = s2KivikSqueezePath(0); // frame 066
+      setSrc(s2overlay, s2KivikSqueezePath(0)); // frame 066
       const startOff = 28 + 42; // 70px — fully spread
       s2sqL.style.left = `calc(50% - ${startOff}px)`;
       s2sqR.style.left = `calc(50% + ${startOff}px)`;
@@ -2875,7 +2876,7 @@ function setS2Mode(mode, startAutoCycle) {
       s2StretchDir  = 1;
       s2SetFingerMorph(0);
       const firstFrame = isSqueeze ? s2KivikStretchPath(0) : stretchPath(0);
-      s2overlay.src = firstFrame;
+      setSrc(s2overlay, firstFrame);
       s2sqL.style.left = 'calc(50% - 28px)';
       s2sqR.style.left = 'calc(50% + 28px)';
     }
@@ -2948,17 +2949,52 @@ requestAnimationFrame(() => {
   s3PanelRefs.forEach(e => { e.refs.el.style.width='0px'; e.refs.el.style.display='none'; });
 });
 
-// Preload frames eagerly — all press frames for S2 sofa + stretch + key S3 frames
+// ── Image cache — keeps Image objects in memory so GC can't drop them ────────
+const IMG_CACHE = {};
+function cacheImg(src) {
+  if (!IMG_CACHE[src]) {
+    var im = new Image();
+    im.src = src;
+    IMG_CACHE[src] = im;
+  }
+  return IMG_CACHE[src];
+}
+function imgReady(src) {
+  var im = IMG_CACHE[src];
+  return im && im.complete && im.naturalWidth > 0;
+}
+// Set an <img> src only when cached image is ready; otherwise wait and retry
+function setSrc(el, src) {
+  if (imgReady(src)) { el.src = src; return; }
+  cacheImg(src); // ensure it's in cache / downloading
+  var check = setInterval(function() {
+    if (imgReady(src)) { el.src = src; clearInterval(check); }
+  }, 50);
+}
+
+// Preload all frames at startup
 (function preloadAll() {
-  // S2 sofa (JÄTTEBO) — all press frames
+  // S2 press — JÄTTEBO all frames
   const j = SOFAS[0];
-  for (let i = 0; i <= j.endFrame; i++) { new Image().src = pressPath(j, i); }
-  // Stretch frames
-  for (let i = 0; i <= 31; i++) { new Image().src = stretchPath(i); }
-  // S3 panels — frame 15 for each sofa (used in the compare reveal)
-  SOFAS.forEach(s => { new Image().src = pressPath(s, 15); });
-  // S3 panels — frame 0 for KIVIK and SÖDERHAMN
-  SOFAS.slice(1).forEach(s => { new Image().src = pressPath(s, 0); });
+  for (var i = 0; i <= j.endFrame; i++) cacheImg(pressPath(j, i));
+
+  // S2 structure — Jattebo stretch-with-hand (0–31)
+  for (var i = 0; i <= 31; i++) cacheImg(stretchPath(i));
+
+  // S2 squeeze — Kivik stretch horizontal (13–50)
+  for (var i = 0; i < S2_KIVIK_STRETCH_FRAMES; i++)
+    cacheImg('Kivik_stretch_horizontal/kivik_stretch_horizontal' + (S2_KIVIK_STRETCH_START + i) + '.jpg');
+
+  // S2 squeezein — Kivik squeeze (066–129)
+  for (var i = 0; i < S2_KIVIK_SQUEEZE_FRAMES; i++) {
+    var n = String(S2_KIVIK_SQUEEZE_START + i).padStart(3, '0');
+    cacheImg('Kivik_squeze/kivik_squeeze' + n + '.jpg');
+  }
+
+  // S3 / S24 — KIVIK and SÖDERHAMN all press frames
+  SOFAS.slice(1).forEach(function(s) {
+    for (var i = 0; i <= s.endFrame; i++) cacheImg(pressPath(s, i));
+  });
 })();
 
 })();
